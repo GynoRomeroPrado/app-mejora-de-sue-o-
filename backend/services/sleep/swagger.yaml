@@ -1,0 +1,571 @@
+openapi: 3.0.3
+info:
+  title: SleepWise Sleep Service API
+  description: Sleep session management and analysis service
+  version: 1.0.0
+  contact:
+    name: SleepWise Support
+    email: support@sleepwise.app
+
+servers:
+  - url: http://localhost:3002/api/sleep
+    description: Development server
+  - url: https://api.sleepwise.app/sleep
+    description: Production server
+
+tags:
+  - name: Sessions
+    description: Sleep session management
+  - name: Audio
+    description: Audio recording and upload
+  - name: Analysis
+    description: Sleep analysis and insights
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    SleepSession:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        duration:
+          type: number
+          description: Duration in minutes
+        status:
+          type: string
+          enum: [IN_PROGRESS, PROCESSING, COMPLETED, FAILED]
+        qualityScore:
+          type: number
+          minimum: 0
+          maximum: 100
+        deepSleepMinutes:
+          type: number
+        remSleepMinutes:
+          type: number
+        lightSleepMinutes:
+          type: number
+        awakeMinutes:
+          type: number
+        sleepEfficiency:
+          type: number
+          minimum: 0
+          maximum: 1
+        averageHeartRate:
+          type: number
+        heartRateVariability:
+          type: number
+        averageBreathingRate:
+          type: number
+        snoringDuration:
+          type: number
+        phases:
+          type: array
+          items:
+            $ref: '#/components/schemas/SleepPhase'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/SleepEvent'
+
+    SleepPhase:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        phase:
+          type: string
+          enum: [AWAKE, LIGHT, DEEP, REM]
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        duration:
+          type: number
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+
+    SleepEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [SNORING, MOVEMENT, BREATHING_IRREGULARITY, ENVIRONMENT_CHANGE, APNEA_DETECTED]
+        timestamp:
+          type: string
+          format: date-time
+        confidence:
+          type: number
+        severity:
+          type: string
+          enum: [LOW, MODERATE, HIGH]
+        duration:
+          type: number
+        metadata:
+          type: object
+
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          default: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+
+paths:
+  /sessions:
+    post:
+      tags:
+        - Sessions
+      summary: Start a new sleep session
+      description: Initiates a new sleep recording session
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - timezone
+              properties:
+                timezone:
+                  type: string
+                  example: America/New_York
+                deviceInfo:
+                  type: object
+                  properties:
+                    model:
+                      type: string
+                    os:
+                      type: string
+                    appVersion:
+                      type: string
+                notes:
+                  type: string
+      responses:
+        '201':
+          description: Session started successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/SleepSession'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      tags:
+        - Sessions
+      summary: Get sleep session history
+      description: Returns paginated list of user's sleep sessions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [IN_PROGRESS, PROCESSING, COMPLETED, FAILED]
+      responses:
+        '200':
+          description: Sessions retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SleepSession'
+                  pagination:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      limit:
+                        type: integer
+                      offset:
+                        type: integer
+
+  /sessions/{sessionId}:
+    get:
+      tags:
+        - Sessions
+      summary: Get sleep session details
+      description: Returns detailed information about a specific sleep session
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/SleepSession'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    patch:
+      tags:
+        - Sessions
+      summary: End sleep session
+      description: Ends an active sleep recording session
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - endTime
+              properties:
+                endTime:
+                  type: string
+                  format: date-time
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Session ended successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/SleepSession'
+
+    delete:
+      tags:
+        - Sessions
+      summary: Delete sleep session
+      description: Permanently deletes a sleep session and all associated data
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /sessions/{sessionId}/audio:
+    post:
+      tags:
+        - Audio
+      summary: Upload audio chunk
+      description: Uploads an audio chunk for a sleep session
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - chunkNumber
+                - chunkData
+              properties:
+                chunkNumber:
+                  type: integer
+                  minimum: 1
+                chunkData:
+                  type: string
+                  format: base64
+                  description: Base64 encoded audio data
+                duration:
+                  type: number
+                  description: Chunk duration in seconds
+                metadata:
+                  type: object
+      responses:
+        '200':
+          description: Audio chunk uploaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      chunkId:
+                        type: string
+                      uploadedAt:
+                        type: string
+                        format: date-time
+        '400':
+          description: Invalid audio data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /sessions/{sessionId}/analysis:
+    get:
+      tags:
+        - Analysis
+      summary: Get sleep analysis
+      description: Returns detailed analysis of a completed sleep session
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Analysis retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      session:
+                        $ref: '#/components/schemas/SleepSession'
+                      insights:
+                        type: object
+                        properties:
+                          sleepQuality:
+                            type: string
+                            enum: [EXCELLENT, GOOD, FAIR, POOR]
+                          recommendations:
+                            type: array
+                            items:
+                              type: string
+                          concerns:
+                            type: array
+                            items:
+                              type: string
+                          comparisons:
+                            type: object
+                            properties:
+                              weekAverage:
+                                type: number
+                              monthAverage:
+                                type: number
+                              personalBest:
+                                type: number
+
+  /analytics/trends:
+    get:
+      tags:
+        - Analysis
+      summary: Get sleep trends
+      description: Returns sleep trends and statistics over time
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [week, month, quarter, year]
+            default: month
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Trends retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      averageQualityScore:
+                        type: number
+                      averageDuration:
+                        type: number
+                      averageDeepSleep:
+                        type: number
+                      averageRemSleep:
+                        type: number
+                      consistency:
+                        type: number
+                      trends:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            date:
+                              type: string
+                              format: date
+                            qualityScore:
+                              type: number
+                            duration:
+                              type: number
+
+  /analytics/recommendations:
+    get:
+      tags:
+        - Analysis
+      summary: Get personalized recommendations
+      description: Returns AI-generated sleep improvement recommendations
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Recommendations retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      recommendations:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            category:
+                              type: string
+                              enum: [SCHEDULE, ENVIRONMENT, LIFESTYLE, MEDICAL]
+                            title:
+                              type: string
+                            description:
+                              type: string
+                            priority:
+                              type: string
+                              enum: [HIGH, MEDIUM, LOW]
+                            impact:
+                              type: string

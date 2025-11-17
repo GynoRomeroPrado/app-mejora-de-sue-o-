@@ -1,0 +1,427 @@
+// SleepWise Database Schema
+// PostgreSQL with TimescaleDB extension for time-series data
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER MANAGEMENT
+// ============================================
+
+enum UserRole {
+  USER
+  FAMILY_ADMIN
+  FAMILY_MEMBER
+  CORPORATE_ADMIN
+  CORPORATE_MEMBER
+  ADMIN
+}
+
+enum SubscriptionTier {
+  FREE
+  PREMIUM
+  FAMILY
+  CORPORATE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  EXPIRED
+  TRIAL
+  PAST_DUE
+}
+
+model User {
+  id                String             @id @default(uuid())
+  email             String             @unique
+  passwordHash      String
+  name              String
+  dateOfBirth       DateTime?
+  gender            String?
+  timezone          String             @default("UTC")
+  role              UserRole           @default(USER)
+  subscriptionTier  SubscriptionTier   @default(FREE)
+  profileImage      String?
+  emailVerified     Boolean            @default(false)
+  emailVerifiedAt   DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  lastLoginAt       DateTime?
+
+  // Relations
+  sleepSessions     SleepSession[]
+  healthMetrics     HealthMetric[]
+  predictions       Prediction[]
+  notifications     Notification[]
+  smartAlarms       SmartAlarm[]
+  subscription      Subscription?
+  familyMemberships FamilyMember[]
+  adminFamilies     FamilyGroup[]      @relation("FamilyAdmin")
+  corporateMemberships CorporateMember[]
+  adminOrganizations CorporateOrganization[] @relation("CorporateAdmin")
+
+  @@index([email])
+  @@index([subscriptionTier])
+  @@map("users")
+}
+
+// ============================================
+// SLEEP TRACKING
+// ============================================
+
+enum SleepPhase {
+  AWAKE
+  REM
+  LIGHT
+  DEEP
+}
+
+enum SleepSessionStatus {
+  RECORDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model SleepSession {
+  id            String              @id @default(uuid())
+  userId        String
+  startTime     DateTime
+  endTime       DateTime?
+  duration      Int?                // minutes
+  sleepScore    Int?                // 0-100
+  efficiency    Float?              // percentage
+  audioFileUrl  String?
+  status        SleepSessionStatus  @default(RECORDING)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  // Relations
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  phases        SleepPhaseSegment[]
+  events        SleepEvent[]
+  predictions   Prediction[]
+
+  @@index([userId, startTime])
+  @@index([status])
+  @@map("sleep_sessions")
+}
+
+model SleepPhaseSegment {
+  id          String      @id @default(uuid())
+  sessionId   String
+  phase       SleepPhase
+  startTime   DateTime
+  endTime     DateTime
+  duration    Int         // minutes
+  confidence  Float       // 0-1
+
+  // Relations
+  session     SleepSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, startTime])
+  @@map("sleep_phase_segments")
+}
+
+enum SleepEventType {
+  SNORING
+  APNEA
+  MOVEMENT
+  AWAKENING
+  OTHER
+}
+
+enum EventSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model SleepEvent {
+  id          String          @id @default(uuid())
+  sessionId   String
+  type        SleepEventType
+  timestamp   DateTime
+  duration    Int?            // seconds
+  severity    EventSeverity?
+  confidence  Float           // 0-1
+  metadata    Json?
+
+  // Relations
+  session     SleepSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, timestamp])
+  @@index([type])
+  @@map("sleep_events")
+}
+
+// ============================================
+// HEALTH METRICS
+// ============================================
+
+enum HealthMetricType {
+  HEART_RATE
+  HRV
+  SPO2
+  STEPS
+  CALORIES
+  OTHER
+}
+
+enum HealthMetricSource {
+  HEALTHKIT
+  GOOGLEFIT
+  MANUAL
+  OTHER
+}
+
+model HealthMetric {
+  id          String              @id @default(uuid())
+  userId      String
+  type        HealthMetricType
+  value       Float
+  unit        String
+  timestamp   DateTime
+  source      HealthMetricSource
+  metadata    Json?
+
+  // Relations
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, timestamp])
+  @@index([type])
+  @@map("health_metrics")
+}
+
+// ============================================
+// AI PREDICTIONS
+// ============================================
+
+enum PredictionType {
+  SLEEP_QUALITY
+  APNEA_RISK
+  COGNITIVE_DECLINE
+  BURNOUT
+  OTHER
+}
+
+model Prediction {
+  id            String          @id @default(uuid())
+  userId        String
+  sessionId     String?
+  type          PredictionType
+  value         Float           // 0-1 probability or score
+  confidence    Float           // 0-1
+  explanation   String
+  recommendations Json          // Array of recommendations
+  createdAt     DateTime        @default(now())
+  validUntil    DateTime
+
+  // Relations
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session       SleepSession?   @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([type])
+  @@map("predictions")
+}
+
+// ============================================
+// FAMILY FEATURES
+// ============================================
+
+model FamilyGroup {
+  id          String          @id @default(uuid())
+  name        String
+  adminId     String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  // Relations
+  admin       User            @relation("FamilyAdmin", fields: [adminId], references: [id], onDelete: Cascade)
+  members     FamilyMember[]
+
+  @@index([adminId])
+  @@map("family_groups")
+}
+
+enum FamilyMemberRole {
+  ADMIN
+  MEMBER
+}
+
+model FamilyMember {
+  id          String            @id @default(uuid())
+  groupId     String
+  userId      String
+  role        FamilyMemberRole  @default(MEMBER)
+  nickname    String?
+  permissions Json              // FamilyPermissions object
+  addedAt     DateTime          @default(now())
+
+  // Relations
+  group       FamilyGroup       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([userId])
+  @@map("family_members")
+}
+
+// ============================================
+// CORPORATE FEATURES
+// ============================================
+
+model CorporateOrganization {
+  id                String             @id @default(uuid())
+  name              String
+  adminId           String
+  employees         Int                @default(0)
+  subscriptionTier  SubscriptionTier   @default(CORPORATE)
+  settings          Json               // CorporateSettings object
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  // Relations
+  admin             User               @relation("CorporateAdmin", fields: [adminId], references: [id], onDelete: Cascade)
+  members           CorporateMember[]
+  subscription      Subscription?
+
+  @@index([adminId])
+  @@map("corporate_organizations")
+}
+
+model CorporateMember {
+  id              String                @id @default(uuid())
+  organizationId  String
+  userId          String
+  department      String?
+  addedAt         DateTime              @default(now())
+
+  // Relations
+  organization    CorporateOrganization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user            User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@map("corporate_members")
+}
+
+// ============================================
+// SUBSCRIPTIONS & BILLING
+// ============================================
+
+model Subscription {
+  id                String              @id @default(uuid())
+  userId            String?             @unique
+  organizationId    String?             @unique
+  tier              SubscriptionTier
+  status            SubscriptionStatus  @default(ACTIVE)
+  stripeCustomerId  String?             @unique
+  stripeSubscriptionId String?          @unique
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelAtPeriodEnd  Boolean            @default(false)
+  trialEndsAt       DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  // Relations
+  user              User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization      CorporateOrganization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("subscriptions")
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+enum NotificationType {
+  ALERT
+  INSIGHT
+  REMINDER
+  FAMILY
+  CORPORATE
+  SYSTEM
+}
+
+model Notification {
+  id          String            @id @default(uuid())
+  userId      String
+  type        NotificationType
+  title       String
+  message     String
+  data        Json?
+  read        Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+
+  // Relations
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([read])
+  @@map("notifications")
+}
+
+// ============================================
+// SMART ALARMS
+// ============================================
+
+model SmartAlarm {
+  id            String    @id @default(uuid())
+  userId        String
+  targetTime    DateTime
+  windowMinutes Int       @default(30)
+  enabled       Boolean   @default(true)
+  daysOfWeek    Int[]     // 0-6, Sunday = 0
+  vibrate       Boolean   @default(true)
+  soundUrl      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("smart_alarms")
+}
+
+// ============================================
+// AUDIT LOGS (HIPAA Compliance)
+// ============================================
+
+enum AuditAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  EXPORT
+  SHARE
+}
+
+model AuditLog {
+  id          String      @id @default(uuid())
+  userId      String?
+  action      AuditAction
+  resource    String      // e.g., "sleep_session", "user_profile"
+  resourceId  String?
+  ipAddress   String?
+  userAgent   String?
+  metadata    Json?
+  createdAt   DateTime    @default(now())
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}

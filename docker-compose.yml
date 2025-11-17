@@ -1,0 +1,205 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with TimescaleDB
+  postgres:
+    image: timescale/timescaledb:latest-pg15
+    container_name: sleepwise-postgres
+    environment:
+      POSTGRES_DB: sleepwise
+      POSTGRES_USER: sleepwise
+      POSTGRES_PASSWORD: sleepwise_dev_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/shared/prisma/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sleepwise"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sleepwise-network
+
+  # Redis for caching and sessions
+  redis:
+    image: redis:7-alpine
+    container_name: sleepwise-redis
+    command: redis-server --appendonly yes --requirepass sleepwise_redis_password
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sleepwise-network
+
+  # Auth Service
+  auth-service:
+    build:
+      context: ./backend/services/auth
+      dockerfile: Dockerfile
+    container_name: sleepwise-auth
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DATABASE_URL: postgresql://sleepwise:sleepwise_dev_password@postgres:5432/sleepwise
+      REDIS_URL: redis://:sleepwise_redis_password@redis:6379
+      JWT_SECRET: dev_jwt_secret_change_in_production
+      JWT_REFRESH_SECRET: dev_refresh_secret_change_in_production
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:19006
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/services/auth:/app
+      - /app/node_modules
+    command: npm run dev
+    networks:
+      - sleepwise-network
+
+  # Sleep Service
+  sleep-service:
+    build:
+      context: ./backend/services/sleep
+      dockerfile: Dockerfile
+    container_name: sleepwise-sleep
+    environment:
+      NODE_ENV: development
+      PORT: 3002
+      DATABASE_URL: postgresql://sleepwise:sleepwise_dev_password@postgres:5432/sleepwise
+      REDIS_URL: redis://:sleepwise_redis_password@redis:6379
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: us-east-1
+      S3_BUCKET: sleepwise-audio-dev
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/services/sleep:/app
+      - /app/node_modules
+    command: npm run dev
+    networks:
+      - sleepwise-network
+
+  # ML Inference Service
+  ml-service:
+    build:
+      context: ./ml
+      dockerfile: Dockerfile
+    container_name: sleepwise-ml
+    environment:
+      PYTHONUNBUFFERED: 1
+      MODEL_PATH: /models
+      REDIS_URL: redis://:sleepwise_redis_password@redis:6379
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./ml:/app
+      - ml_models:/models
+    command: uvicorn inference.app:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - sleepwise-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # MinIO (S3-compatible storage for local dev)
+  minio:
+    image: minio/minio:latest
+    container_name: sleepwise-minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - sleepwise-network
+
+  # Adminer (Database Management UI)
+  adminer:
+    image: adminer:latest
+    container_name: sleepwise-adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    networks:
+      - sleepwise-network
+
+  # Prometheus (Monitoring)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: sleepwise-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - sleepwise-network
+
+  # Grafana (Dashboards)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: sleepwise-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-clock-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    depends_on:
+      - prometheus
+    networks:
+      - sleepwise-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  ml_models:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  sleepwise-network:
+    driver: bridge

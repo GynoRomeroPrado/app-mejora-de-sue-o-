@@ -1,0 +1,44 @@
+{
+  "name": "sleepwise-backend",
+  "version": "1.0.0",
+  "description": "SleepWise Backend Microservices",
+  "private": true,
+  "workspaces": [
+    "services/*",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:*\"",
+    "dev:auth": "npm run dev --workspace=services/auth",
+    "dev:user": "npm run dev --workspace=services/user",
+    "dev:sleep": "npm run dev --workspace=services/sleep",
+    "dev:audio": "npm run dev --workspace=services/audio",
+    "dev:family": "npm run dev --workspace=services/family",
+    "dev:corporate": "npm run dev --workspace=services/corporate",
+    "dev:analytics": "npm run dev --workspace=services/analytics",
+    "dev:subscription": "npm run dev --workspace=services/subscription",
+    "dev:notification": "npm run dev --workspace=services/notification",
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write \"**/*.ts\"",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "migrate": "npm run migrate --workspace=shared",
+    "seed": "npm run seed --workspace=shared"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.4",
+    "@typescript-eslint/eslint-plugin": "^6.13.2",
+    "@typescript-eslint/parser": "^6.13.2",
+    "concurrently": "^8.2.2",
+    "eslint": "^8.55.0",
+    "prettier": "^3.1.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}

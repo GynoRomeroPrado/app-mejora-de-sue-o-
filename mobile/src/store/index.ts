@@ -5,6 +5,7 @@ import sleepReducer from './slices/sleepSlice';
 import familyReducer from './slices/familySlice';
 import settingsReducer from './slices/settingsSlice';
 import notificationsReducer from './slices/notificationsSlice';
+import subscriptionReducer from './slices/subscriptionSlice';
 
 export const store = configureStore({
   reducer: {
@@ -13,6 +14,7 @@ export const store = configureStore({
     family: familyReducer,
     settings: settingsReducer,
     notifications: notificationsReducer,
+    subscription: subscriptionReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

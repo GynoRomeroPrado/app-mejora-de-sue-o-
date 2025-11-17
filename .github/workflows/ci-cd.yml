@@ -41,7 +41,7 @@ jobs:
 
       - name: Run tests
         working-directory: ./mobile
-        run: npm test -- --coverage
+        run: npm run test:ci
 
       - name: Upload coverage
         uses: codecov/codecov-action@v3
@@ -103,25 +103,58 @@ jobs:
           npm run migrate
           npm run seed
 
-      - name: Lint code
-        working-directory: ./backend
-        run: npm run lint
+      - name: Test Auth Service
+        working-directory: ./backend/services/auth
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/sleepwise_test
+          JWT_SECRET: test_secret
+          JWT_REFRESH_SECRET: test_refresh_secret
+        run: |
+          npm ci
+          npm run test:ci
 
-      - name: Run tests
-        working-directory: ./backend
+      - name: Test Sleep Service
+        working-directory: ./backend/services/sleep
         env:
           DATABASE_URL: postgresql://test:test@localhost:5432/sleepwise_test
           REDIS_URL: redis://localhost:6379
-          JWT_SECRET: test_secret
-          JWT_REFRESH_SECRET: test_refresh_secret
-        run: npm test -- --coverage
+          AWS_REGION: us-east-1
+          S3_BUCKET: test-bucket
+          ML_SERVICE_URL: http://localhost:8000
+        run: |
+          npm ci
+          npm run test:ci
 
-      - name: Upload coverage
+      - name: Test Family Service
+        working-directory: ./backend/services/family
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/sleepwise_test
+          SMTP_HOST: smtp.test.com
+          SMTP_USER: test@example.com
+        run: |
+          npm ci
+          npm run test:ci
+
+      - name: Upload Auth Service Coverage
         uses: codecov/codecov-action@v3
         with:
-          files: ./backend/coverage/lcov.info
-          flags: backend
-          name: backend-coverage
+          files: ./backend/services/auth/coverage/lcov.info
+          flags: backend-auth
+          name: auth-service-coverage
+
+      - name: Upload Sleep Service Coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./backend/services/sleep/coverage/lcov.info
+          flags: backend-sleep
+          name: sleep-service-coverage
+
+      - name: Upload Family Service Coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./backend/services/family/coverage/lcov.info
+          flags: backend-family
+          name: family-service-coverage
 
   # ML Models CI
   ml-ci:
@@ -144,6 +177,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
       - name: Lint with flake8
         working-directory: ./ml
